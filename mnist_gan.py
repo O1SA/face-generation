@@ -9,25 +9,7 @@ from shutil import rmtree
 class MnistGAN():
 
     def __init__(self):
-        pass 
-
-    def show_generator_output(self, sess, n_images, input_z, out_channel_dim, image_mode):
-        """
-        Show example output for the generator
-        :param sess: TensorFlow session
-        :param n_images: Number of Images to display
-        :param input_z: Input Z Tensor
-        :param out_channel_dim: The number of channels in the output image
-        :param image_mode: The mode to use for images ("RGB" or "L")
-        """
-        z_dim = input_z.get_shape().as_list()[-1]
-        example_z = np.random.uniform(-1, 1, size=[n_images, z_dim])
-
-        samples = sess.run(
-            self.generator(input_z, out_channel_dim, False),
-            feed_dict={input_z: example_z})
-
-        return np.array(helper.images_square_grid(samples, image_mode))
+        tf.logging.set_verbosity(tf.logging.WARN) 
 
     def model_loss(self, input_real, input_z, out_channel_dim):
         """
@@ -38,7 +20,8 @@ class MnistGAN():
         :return: A tuple of (discriminator loss, generator loss)
         """
 
-        g_model = self.generator(input_z, out_channel_dim)
+        g_model, is_train = self.generator(input_z, out_channel_dim)
+
         d_model_real, d_logits_real = self.discriminator(input_real)
         d_model_fake, d_logits_fake = self.discriminator(g_model, reuse = True)
         
@@ -56,7 +39,7 @@ class MnistGAN():
         
         d_loss = d_loss_real + d_loss_fake
         
-        return d_loss, g_loss
+        return d_loss, g_loss, is_train
 
     def model_inputs(self, image_width, image_height, image_channels, z_dim):
         """
@@ -79,7 +62,7 @@ class MnistGAN():
 
         return inputs_real, inputs_z, learning_rate
 
-    def generator(self, z, out_channel_dim, is_train=True):
+    def generator(self, z, out_channel_dim, reuse = False):
         """
         Create the generator network
         :param z: Input z
@@ -87,11 +70,14 @@ class MnistGAN():
         :param is_train: Boolean if generator is being used for training
         :return: The tensor output of the generator
         """
-    
+        
         alpha = 0.2 # Leaky ReLu hyperparameter
-        with tf.variable_scope('generator', reuse = not is_train):
+        
+        with tf.variable_scope('generator', reuse = reuse):
             # output shape should be 28 x 28 x out_channel_dim
-            
+
+            is_train = tf.placeholder(tf.bool, name='is_train')
+
             # dense layer + reshape 
             # output shape: (-1,7,7,64)
             x = tf.layers.dense(z, units=7*7*64, activation=None)
@@ -101,16 +87,16 @@ class MnistGAN():
             
             # transpose convolution layer #1
             # output shape: (-1,14,14,128)
-            x1 = tf.layers.conv2d_transpose(x,filters=128,kernel_size=5,strides=2, padding='same')
+            x1 = tf.layers.conv2d_transpose(x,filters=128, kernel_size=5, strides=2, padding='same')
             x1 = tf.layers.batch_normalization(x1,training = is_train)
             x1 = tf.maximum(alpha * x1, x1) # Leaky ReLu
             
             # transpose convolution layer #2
             # output shape, (-1,28,28,output_dim)
             logits = tf.layers.conv2d_transpose(x1,filters=out_channel_dim,kernel_size=5,strides=2, padding='same')
-            out = tf.tanh(logits)
+            out = tf.tanh(logits, name='out')
 
-            return out
+            return out, is_train
 
     def discriminator(self, images, reuse=False):
         """
@@ -171,7 +157,9 @@ class MnistGAN():
     def train(self, epoch_count, batch_size, z_dim, learning_rate, beta1, get_batches, data_shape, data_image_mode, 
               loss_each, 
               image_each, 
-              log_dir):
+              log_dir,
+              save, 
+              out_dir):
         """
         Train the GAN
         :param epoch_count: Number of epochs
@@ -187,48 +175,91 @@ class MnistGAN():
         image_channels = 1
         if data_image_mode == 'RGB':
             image_channels = 3
-        
-        inputs_real, inputs_z, lr = self.model_inputs(data_shape[1], data_shape[2], image_channels, z_dim)
-        d_loss, g_loss = self.model_loss(inputs_real, inputs_z, image_channels)
-        d_opt, g_opt = self.model_opt(d_loss, g_loss, learning_rate, beta1)
 
-        # placeholder for images summary
-        train_images = tf.placeholder(tf.float32, shape=[None, data_shape[1], data_shape[2], image_channels])
-
-        # tensorboard summaries 
-        disc_summ = tf.summary.scalar('discriminator loss', d_loss)
-        gen_summ = tf.summary.scalar('generator loss', g_loss)
-        summ_images = tf.summary.image('train images', train_images, 1)
-        summ = tf.summary.merge([disc_summ, gen_summ])
+        train_graph = tf.Graph()
+        with train_graph.as_default():
         
+            inputs_real, inputs_z, lr = self.model_inputs(data_shape[1], data_shape[2], image_channels, z_dim)
+            d_loss, g_loss, is_train = self.model_loss(inputs_real, inputs_z, image_channels)
+            d_opt, g_opt = self.model_opt(d_loss, g_loss, learning_rate, beta1)
+
+            # placeholder for images summary
+            train_images = tf.placeholder(tf.float32, shape=[None, data_shape[1], data_shape[2], image_channels])
+
+            # tensorboard summaries 
+            disc_summ = tf.summary.scalar('discriminator loss', d_loss)
+            gen_summ = tf.summary.scalar('generator loss', g_loss)
+            summ_images = tf.summary.image('train images', train_images, 1)
+            summ = tf.summary.merge([disc_summ, gen_summ])
+
         it = 0
-        with tf.Session() as sess:
+        with tf.Session(graph=train_graph) as sess:
+
+            # initialize variables
             sess.run(tf.global_variables_initializer())
+
+            # tensorflow save
+            saver = tf.train.Saver() 
+
+            # create tensorboard writer
             writer = self._create_writer(log_dir, sess) 
+
             for epoch_i in range(epoch_count):
                 print("Running epoch {}/{}...".format(epoch_i+1, epoch_count) )
+
                 for batch_images in get_batches(batch_size):
 
                     batch_z = np.random.uniform(-1, 1, size=(batch_size, z_dim))
                     
-                    _ = sess.run(d_opt, feed_dict={inputs_real: batch_images*2, inputs_z: batch_z, lr: learning_rate})
-                    _ = sess.run(g_opt, feed_dict={inputs_z: batch_z, inputs_real: batch_images*2, lr: learning_rate})
+                    _ = sess.run(d_opt, feed_dict={inputs_real: batch_images*2, 
+                                                   inputs_z: batch_z,
+                                                   lr: learning_rate,
+                                                   is_train: True})
+
+                    _ = sess.run(g_opt, feed_dict={inputs_z: batch_z, 
+                                                   inputs_real: batch_images*2, 
+                                                   lr: learning_rate,
+                                                   is_train: True})
                     
                     if it % loss_each == 0:
                         # log summaries to tensorboard
-                        s = sess.run(summ, feed_dict={inputs_real: batch_images*2, inputs_z: batch_z}) 
+                        s = sess.run(summ, feed_dict={inputs_real: batch_images*2, inputs_z: batch_z, is_train: True}) 
                         writer.add_summary(s, it)
 
                     if it % image_each == 0:
                         # log images to tensorboard
-                        img_arr = self.show_generator_output(sess, 1, inputs_z, image_channels, data_image_mode)
+                        example_z = np.random.uniform(-1, 1, size=[1, z_dim])
+                        out = train_graph.get_tensor_by_name('generator/out:0')
+                        img_arr = sess.run(out,feed_dict={inputs_z: example_z, is_train: False})
                         img_arr_reshape = np.reshape(img_arr, (1, 28,28,image_channels ))
-                        s = sess.run(summ_images, feed_dict={train_images: img_arr_reshape})
-                        writer.add_summary(s, it)
+                        s = sess.run(summ_images, feed_dict={train_images: img_arr_reshape, is_train: False})
+                        writer.add_summary(s, it)            
                     
                     it+=1
-            
+
+            # save results before closing session 
+            if save:
+                saver.save(sess, out_dir + '/mnist_gan.ckpt')
+
             print('Done.')
+
+    def generate(self, save_file):
+        
+        loaded_graph = tf.Graph()
+        with loaded_graph.as_default():
+            loader = tf.train.import_meta_graph(save_file + '.meta')
+
+            # get tensor from loaded graph
+            inputs_z = loaded_graph.get_tensor_by_name('inputs_z:0')
+            is_train = loaded_graph.get_tensor_by_name('generator/is_train:0')
+            generator_out = loaded_graph.get_tensor_by_name('generator/out:0')
+            z_dim = inputs_z.get_shape().as_list()[-1]
+
+        with tf.Session(graph=loaded_graph) as sess:
+            loader.restore(sess, save_file)
+            example_z = np.random.uniform(-1, 1, size=[1, z_dim])
+            samples = sess.run(generator_out, feed_dict={is_train: False, inputs_z: example_z})
+            return samples
 
     # Helpers
 
@@ -245,14 +276,17 @@ class MnistGAN():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'MNIST GAN')  
     parser.add_argument("--train", "-t", help="to train mode", action='store_true')
+    parser.add_argument("--save", "-s", help="save model after training", action='store_true' )
     parser.add_argument('--epochs', help='set number of epochs (default=2)', default=2)
     parser.add_argument('--batch_size', help='set batch size (default=32)', default=32)
-    parser.add_argument('--z_dim', help='set z dim (default=100)', default=100)
+    parser.add_argument('--z_dim', help='set z dim (default=100)ju', default=100)
     parser.add_argument('--lrate', help='set learning rate (default=0.0004)', default=0.0004)
     parser.add_argument('--beta1', help='set adam optimizer beta_1 (default=0.7)', default=0.6)
     parser.add_argument('--loss_each', help='log loss to tensorboard each (default=10)', default=10 )
     parser.add_argument('--image_each', help='log image to tensorboard each (default=100)', default=100 )
     parser.add_argument('--log_dir', help='set tensorboard log dir (default=log/mnist)', default='log/mnist')
+    parser.add_argument('--data_dir', help='set data dir (default=data/mnist', default='data/mnist')
+    parser.add_argument('--out_dir', help='set output dir (default=output)', default='output')
 
     args = parser.parse_args()
 
@@ -263,9 +297,10 @@ if __name__ == '__main__':
         gan = MnistGAN()
 
         # get data
-        mnist_dataset = helper.Dataset('mnist', glob('data/mnist/*.jpg'))
+        mnist_dataset = helper.Dataset('mnist', glob(  args.data_dir + '/*.jpg'))
+        print("number of files: {}".format( len(glob(  args.data_dir + '/*.jpg')) ))
 
-        gan.train(args.epochs,
+        gan.train(int(args.epochs),
                   args.batch_size,
                   args.z_dim,
                   args.lrate, 
@@ -275,11 +310,14 @@ if __name__ == '__main__':
                   mnist_dataset.image_mode,
                   args.loss_each, 
                   args.image_each,
-                  args.log_dir)
+                  args.log_dir, 
+                  args.save,
+                  args.out_dir)
 
 # to train with default values
 # python mnist_gan.py --train 
 
 # tensorboard --logdir=log/mnist
 
-# floyd run --cpu --tensorboard --data mckay/datasets/mnist/1:data/mnist "python mnist_gan.py --train --log_dir output/log"
+# GPU
+# floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan/1:mnist --env tensorflow-1.8 "python mnist_gan.py --train --save --epochs 3 --log_dir /output/log --out_dir /output --data_dir /mnist"

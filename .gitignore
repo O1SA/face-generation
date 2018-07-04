@@ -2,6 +2,9 @@
 data/
 venv/*
 log/*
+tmp/*
+output/*
 .ipynb_checkpoints
 .vscode
+.floydexpt
 __pycache__/
