@@ -1,6 +1,6 @@
 
 # Directories and files to ignore when uploading code to floyd
-
+__pycache__/*
 .git
 .eggs
 eggs
@@ -12,11 +12,15 @@ var
 *.pyc
 *.swp
 .DS_Store
-data/
+data/*
 venv/*
+output/*
+tmp/*
 log/*
 .ipynb_checkpoints
 .vscode
 problem_unittests.py
 .gitignore
 dlnd_face_generation.ipynb
+MNIST GAN Results.ipynb
+Test TensorFlow.ipynb

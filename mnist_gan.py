@@ -79,9 +79,9 @@ class MnistGAN():
             is_train = tf.placeholder(tf.bool, name='is_train')
 
             # dense layer + reshape 
-            # output shape: (-1,7,7,64)
-            x = tf.layers.dense(z, units=7*7*64, activation=None)
-            x = tf.reshape(x, shape=[-1,7,7,64])
+            # output shape: (-1,7,7,256)
+            x = tf.layers.dense(z, units=7*7*256, activation=None)
+            x = tf.reshape(x, shape=[-1,7,7,256])
             x = tf.layers.batch_normalization(x,training = is_train) 
             x = tf.maximum(alpha * x, x) # Leaky ReLu
             
@@ -90,10 +90,16 @@ class MnistGAN():
             x1 = tf.layers.conv2d_transpose(x,filters=128, kernel_size=5, strides=2, padding='same')
             x1 = tf.layers.batch_normalization(x1,training = is_train)
             x1 = tf.maximum(alpha * x1, x1) # Leaky ReLu
-            
+
             # transpose convolution layer #2
+            # output shape: (-1,14,14,128)
+            x2 = tf.layers.conv2d_transpose(x1,filters=64, kernel_size=5, padding='same')
+            x2 = tf.layers.batch_normalization(x2,training = is_train)
+            x2 = tf.maximum(alpha * x2, x2) # Leaky ReLu
+            
+            # transpose convolution layer #3
             # output shape, (-1,28,28,output_dim)
-            logits = tf.layers.conv2d_transpose(x1,filters=out_channel_dim,kernel_size=5,strides=2, padding='same')
+            logits = tf.layers.conv2d_transpose(x2,filters=out_channel_dim,kernel_size=5,strides=2, padding='same')
             out = tf.tanh(logits, name='out')
 
             return out, is_train
@@ -113,19 +119,26 @@ class MnistGAN():
             # convolutional layer #1
             # output shape: (-1, 14, 14, 64)
             # no batch normalization for the first layer
-            x1 = tf.layers.conv2d(images, filters=64, kernel_size=5, strides=2, padding='same')
+            x = tf.layers.conv2d(images, filters=64, kernel_size=5, strides=2, padding='same')
+            x = tf.maximum(alpha * x, x) # Leaky ReLu
+            
+            # convolutional layer #2
+            # output shape: (-1, 14, 14, 128)
+            # batch normalization
+            x1 = tf.layers.conv2d(x, filters=128, kernel_size=5, padding='same')
+            x1 = tf.layers.batch_normalization(x1,training=True) 
             x1 = tf.maximum(alpha * x1, x1) # Leaky ReLu
         
-            # convolutional layer #2
-            # output shape: (-1, 7, 7, 128)
+            # convolutional layer #3
+            # output shape: (-1, 7, 7, 256)
             # batch normalization
-            x2 = tf.layers.conv2d(x1, filters=128, kernel_size=5, strides=2, padding='same')
+            x2 = tf.layers.conv2d(x1, filters=256, kernel_size=5, strides=2, padding='same')
             x2 = tf.layers.batch_normalization(x2,training=True) 
             x2 = tf.maximum(alpha * x2, x2) # Leaky ReLu
         
             # reshape
-            # output shape: (-1,4*4*64)
-            x2_reshape = tf.reshape(x2,shape=[-1,7*7*128])
+            # output shape: (-1, 7 * 7 * 256)
+            x2_reshape = tf.reshape(x2,shape=[-1,7*7*256])
         
             # output layer
             # output shape: (-1,1)
@@ -243,7 +256,7 @@ class MnistGAN():
 
             print('Done.')
 
-    def generate(self, save_file):
+    def generate(self, n_images, save_file):
         
         loaded_graph = tf.Graph()
         with loaded_graph.as_default():
@@ -257,7 +270,7 @@ class MnistGAN():
 
         with tf.Session(graph=loaded_graph) as sess:
             loader.restore(sess, save_file)
-            example_z = np.random.uniform(-1, 1, size=[1, z_dim])
+            example_z = np.random.uniform(-1, 1, size=[n_images, z_dim])
             samples = sess.run(generator_out, feed_dict={is_train: False, inputs_z: example_z})
             return samples
 
@@ -314,10 +327,11 @@ if __name__ == '__main__':
                   args.save,
                   args.out_dir)
 
-# to train with default values
-# python mnist_gan.py --train 
+# excaple to train:
+# python mnist_gan.py --epochs 1 --train --save --out_dir output/test
 
 # tensorboard --logdir=log/mnist
 
 # GPU
-# floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan/1:mnist --env tensorflow-1.8 "python mnist_gan.py --train --save --epochs 3 --log_dir /output/log --out_dir /output --data_dir /mnist"
+# floyd login
+# floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan/1:mnist --env tensorflow-1.8 "python mnist_gan.py --train --save --epochs 5 --log_dir /output/log --out_dir /output --data_dir /mnist"
