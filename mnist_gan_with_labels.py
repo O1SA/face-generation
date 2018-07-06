@@ -308,15 +308,12 @@ class MnistGAN():
         with tf.Session(graph=self.loaded_graph) as sess:
             self.loader.restore(sess, save_file)
             samples_z = np.random.uniform(-1, 1, size=[ len(images), self.z_dim])
-            
-            # one hot encode images list 
-            lb = LabelBinarizer()
-            y_lb = lb.fit_transform(images)
-            
-            # add is fake to labels 
-            samples_lb = np.zeros((len(images), y_lb.shape[1] + 1))
-            samples_lb[:,:y_lb.shape[1]] = y_lb
-            
+
+            # 10 numbers + 1 fake 
+            samples_lb = np.zeros((len(images), 11))
+            for i, n in enumerate(images):
+                samples_lb[i, n] = 1
+
             feed = {self.input_z: samples_z,
                     self.label_real: samples_lb,
                     self.is_train: False}
@@ -325,6 +322,7 @@ class MnistGAN():
             samples = sess.run(self.gen_out, feed_dict=feed)
             
             # return scaled btwn 0-255
+            # to do samples not exactly -1 +1 
             return (samples / 2 + 0.5) * self.IMAGE_MAX_VALUE
 
     # Helpers
@@ -378,6 +376,6 @@ if __name__ == '__main__':
 
 # GPU
 # floyd login
-# floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan-label/1:mnist_label --env tensorflow-1.8 "python mnist_gan_with_labels.py --train --save --epochs 2 --log_dir /output/log --out_dir /output --in_dir /mnist_label"
+# floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan-label/1:mnist_label --env tensorflow-1.8 "python mnist_gan_with_labels.py --train --save --epochs 5 --log_dir /output/log --out_dir /output --in_dir /mnist_label"
 
 
