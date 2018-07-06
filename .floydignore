@@ -17,6 +17,7 @@ venv/*
 output/*
 tmp/*
 log/*
+test/*
 .ipynb_checkpoints
 .vscode
 problem_unittests.py
