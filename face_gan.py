@@ -63,10 +63,11 @@ class FaceGAN():
         """ Create generator layers
         
         input random noise                          (-1, z_dim)
-        reshape with fully connected layer          (-1, 7, 7, 256)
-        transpose conv. layer #1, strides=2         (-1, 14, 14, 128)
-        transpose conv. layer #2, strides=1         (-1, 14, 14, 64)
-        transpose conv. layer #3, strides=2         (-1, 28, 28, 3)
+        reshape with fully connected layer          (-1, 7, 7, 512)
+        transpose conv. layer #1, strides=2         (-1, 14, 14, 256)
+        transpose conv. layer #2, strides=1         (-1, 14, 14, 128)
+        transpose conv. layer #3, strides=2         (-1, 28, 28, 64)
+        transpose conv. layer #4, strides=1         (-1, 28, 28, 64)
         
         Args:
           z (tf.placeholder): Input noise to the generator
@@ -79,20 +80,24 @@ class FaceGAN():
 
         alpha = 0.2
         with tf.variable_scope('generator', reuse = reuse):
-            x = tf.layers.dense(z, units=7*7*256, activation=None)
-            x = tf.reshape(x, shape=[-1,7,7,256])
+            x = tf.layers.dense(z, units=7*7*512, activation=None)
+            x = tf.reshape(x, shape=[-1,7,7,512])
             x = tf.layers.batch_normalization(x,training = is_train) 
             x = tf.maximum(alpha * x, x) 
             
-            x1 = tf.layers.conv2d_transpose(x,filters=128, kernel_size=5, strides=2, padding='same')
+            x1 = tf.layers.conv2d_transpose(x,filters=256, kernel_size=5, strides=2, padding='same')
             x1 = tf.layers.batch_normalization(x1,training = is_train)
             x1 = tf.maximum(alpha * x1, x1) 
             
-            x2 = tf.layers.conv2d_transpose(x1,filters=64, kernel_size=5, padding='same')
+            x2 = tf.layers.conv2d_transpose(x1,filters=128, kernel_size=5, padding='same')
             x2 = tf.layers.batch_normalization(x2,training = is_train)
             x2 = tf.maximum(alpha * x2, x2) 
+
+            x3 = tf.layers.conv2d_transpose(x2,filters=64, kernel_size=5, strides= 2, padding='same')
+            x3 = tf.layers.batch_normalization(x3,training = is_train)
+            x3 = tf.maximum(alpha * x3, x3) 
             
-            logits = tf.layers.conv2d_transpose(x2,filters=3,kernel_size=5,strides=2, padding='same')
+            logits = tf.layers.conv2d_transpose(x3,filters=3,kernel_size=5, padding='same')
             out = tf.tanh(logits, name='out')
             
             return out, logits
@@ -122,17 +127,21 @@ class FaceGAN():
             x = tf.layers.conv2d(images, filters=64, kernel_size=5, strides=2, padding='same')
             x = tf.maximum(alpha * x, x) 
             
-            x1 = tf.layers.conv2d(x, filters=128, kernel_size=5, strides=2, padding='same')
+            x1 = tf.layers.conv2d(x, filters=128, kernel_size=5, padding='same')
             x1 = tf.layers.batch_normalization(x1,training=True) 
             x1 = tf.maximum(alpha * x1, x1) 
             
-            x2 = tf.layers.conv2d(x1, filters=256, kernel_size=5, padding='same')
+            x2 = tf.layers.conv2d(x1, filters=256, kernel_size=5, strides=2, padding='same')
             x2 = tf.layers.batch_normalization(x2,training=True) 
             x2 = tf.maximum(alpha * x2, x2) 
+
+            x3 = tf.layers.conv2d(x2, filters=512, kernel_size=5, padding='same')
+            x3 = tf.layers.batch_normalization(x3,training=True) 
+            x3 = tf.maximum(alpha * x3, x3) 
             
-            x2_reshape = tf.reshape(x2,shape=[-1,7*7*256])
+            x3_reshape = tf.reshape(x3,shape=[-1,7*7*512])
             
-            logits = tf.layers.dense(x2_reshape, units=1, activation=None)
+            logits = tf.layers.dense(x3_reshape, units=1, activation=None)
             out = tf.sigmoid(logits, name = 'out')
             
             return out, logits
@@ -185,8 +194,6 @@ class FaceGAN():
         
         it = 0
         with tf.Session(graph=train_graph) as sess: 
-            pdb.set_trace()
-
             # tensorflow save
             saver = tf.train.Saver() 
             
@@ -205,14 +212,13 @@ class FaceGAN():
                 print("Running epoch {}/{}...".format(epoch_i+1, epoch_count) )
                 
                 for batch_images in get_batches(batch_size):
-                
                     batch_z = np.random.uniform(-1, 1, size=(batch_size, z_dim))
                     
                     feed = {input_real: batch_images*2,
                             input_z: batch_z, 
                             lr: learning_rate,
                             is_train: True}
-                    
+    
                     _ = sess.run(d_opt, feed_dict=feed)
                     _ = sess.run(g_opt, feed_dict=feed)
                                                    
@@ -258,8 +264,8 @@ class FaceGAN():
             loader = tf.train.import_meta_graph(save_file + '.meta')
             
             # get tensor from loaded graph
-            input_z = g.get_tensor_by_name('input_z')
-            is_train = g.get_tensor_by_name('is_train')
+            input_z = g.get_tensor_by_name('input_z:0')
+            is_train = g.get_tensor_by_name('is_train:0')
             gen_out = g.get_tensor_by_name('generator/out:0')
             z_dim = input_z.get_shape().as_list()[-1]
             
@@ -313,7 +319,6 @@ if __name__ == '__main__':
         gan = FaceGAN()
         
         # get data
-        pdb.set_trace()
         celeba_dataset = helper.Dataset('celeba', glob( args.in_dir + '/*.jpg'))
         print("number of files: {}".format( len(glob(  args.in_dir + '/*.jpg')) ))
         
@@ -330,14 +335,22 @@ if __name__ == '__main__':
                   args.out_dir, 
                   args.restore)
 
+# tensorboard --logdir=log/face
+
 # run local with default values
 # python face_gan.py --train --save 
+# run local with restore 
+# python face_gan.py --train --save --restore output/face/face_gan.ckpt
 
 # GPU
 # floyd login
 
 # with restore ckpt 
-# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --data ostamand/datasets/restore-face-gan/1:restore --env tensorflow-1.8 "python face_gan.py --train --save --epochs 5 --log_dir /output/log --out_dir /output --data_dir /face --restore /restore/face_gan.ckpt"
+# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --data ostamand/datasets/restore-face-gan/3:restore --env tensorflow-1.8 "python face_gan.py --train --save --epochs 1 --log_dir /output/log --out_dir /output --in_dir /face --restore /restore/face_gan.ckpt"
 
 # no restore ckpt
-# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --env tensorflow-1.8 "python face_gan.py --train --save --epochs 5 --log_dir /output/log --out_dir /output --data_dir /face"
+# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --env tensorflow-1.8 "python face_gan.py --train --save --epochs 1 --log_dir /output/log --out_dir /output --in_dir /face"
+
+# AWS 
+# wget https://s3-us-west-1.amazonaws.com/udacity-dlnfd/datasets/celeba.zip
+# unzip celeba.zip
