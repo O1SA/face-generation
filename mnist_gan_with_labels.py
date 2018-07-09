@@ -378,4 +378,3 @@ if __name__ == '__main__':
 # floyd login
 # floyd run --gpu --tensorboard --data ostamand/datasets/mnist-gan-label/1:mnist_label --env tensorflow-1.8 "python mnist_gan_with_labels.py --train --save --epochs 5 --log_dir /output/log --out_dir /output --in_dir /mnist_label"
 
-

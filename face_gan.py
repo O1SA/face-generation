@@ -6,6 +6,9 @@ import os
 from glob import glob
 from shutil import rmtree
 import pdb
+import time
+import requests
+import zipfile
 
 class FaceGAN():
     
@@ -207,6 +210,8 @@ class FaceGAN():
             # create tensorboard writer
             writer = self._create_writer(log_dir, sess) 
             
+            # training start, log time 
+            start_time = time.time()
             for epoch_i in range(epoch_count):
             
                 print("Running epoch {}/{}...".format(epoch_i+1, epoch_count) )
@@ -239,11 +244,14 @@ class FaceGAN():
                         
                     it+=1
                     
+                print("Avg. time per epoch: {:.2f} minutes".format((time.time() - start_time)/(epoch_i+1)/60))
+                    
             # save results before closing session 
             if save:
                 saver.save(sess, out_dir + '/face_gan.ckpt')
 
             print('Done.')
+            print("Total elapsed time: {:.2f} minutes".format((time.time() - start_time)/60))
                     
     def inference(self, n_images, save_file ):
         """ Infer n images from the saved graph
@@ -292,14 +300,36 @@ class FaceGAN():
         os.makedirs(path)
         writer = tf.summary.FileWriter(path, sess.graph)
         return writer
-              
+          
+def setup(in_dir = 'data/face', out_dir='output'):
+    url = 'https://s3-us-west-1.amazonaws.com/udacity-dlnfd/datasets/celeba.zip'
+    r = requests.get(url)
+    
+    if not r.ok:
+        return 
+    
+    # check data folder
+    if os.path.exists(in_dir):
+        rmtree(in_dir)
+    os.makedirs(in_dir)
+        
+    # check output folder
+    if os.path.exists(out_dir):
+        rmtree(out_dir)
+    os.makedirs(out_dir)
+    
+    # zipfile.ZipFile(io.BytesIO(r.content))
+    with zipfile.ZipFile(r.content) as zip:
+        zip.extractall(in_dir)
+     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'FACE GAN')  
     parser.add_argument("--train", "-t", help="to train mode", action='store_true')
+    parser.add_argument("--setup", help="download data & setup folders", action='store_true')
     parser.add_argument("--save", "-s", help="save model after training", action='store_true' )
     parser.add_argument('--epochs', help='set number of epochs (default=2)', default=2)
     parser.add_argument('--batch_size', help='set batch size (default=32)', default=32)
-    parser.add_argument('--z_dim', help='set z dim (default=100)ju', default=100)
+    parser.add_argument('--z_dim', help='set z dim (default=100)', default=100)
     parser.add_argument('--lrate', help='set learning rate (default=0.0004)', default=0.0004)
     parser.add_argument('--beta1', help='set adam optimizer beta_1 (default=0.7)', default=0.6)
     parser.add_argument('--alpha', help='set leaky relu alpha (default=0.2)', default=0.2)
@@ -311,6 +341,10 @@ if __name__ == '__main__':
     parser.add_argument('--restore', help='restore file before training', default=None)
     
     args = parser.parse_args()
+    
+    if args.setup:
+        # run setup 
+        setup()
     
     if args.train:
         # run train 
@@ -334,23 +368,3 @@ if __name__ == '__main__':
                   args.save,
                   args.out_dir, 
                   args.restore)
-
-# tensorboard --logdir=log/face
-
-# run local with default values
-# python face_gan.py --train --save 
-# run local with restore 
-# python face_gan.py --train --save --restore output/face/face_gan.ckpt
-
-# GPU
-# floyd login
-
-# with restore ckpt 
-# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --data ostamand/datasets/restore-face-gan/3:restore --env tensorflow-1.8 "python face_gan.py --train --save --epochs 1 --log_dir /output/log --out_dir /output --in_dir /face --restore /restore/face_gan.ckpt"
-
-# no restore ckpt
-# floyd run --gpu --tensorboard --data udacity/datasets/celeba/1:face --env tensorflow-1.8 "python face_gan.py --train --save --epochs 1 --log_dir /output/log --out_dir /output --in_dir /face"
-
-# AWS 
-# wget https://s3-us-west-1.amazonaws.com/udacity-dlnfd/datasets/celeba.zip
-# unzip celeba.zip
